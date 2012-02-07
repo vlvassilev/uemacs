@@ -1,0 +1,20 @@
+AC_INIT([uemacs], [2012.02.07], [vladimir@ellipticlabs.com])
+
+AC_CANONICAL_SYSTEM
+
+AM_INIT_AUTOMAKE([-Wall -Werror foreign])
+
+AC_PROG_CC
+AC_PROG_CXX
+AM_PROG_AS
+AC_PROG_LIBTOOL
+
+CFLAGS="$CFLAGS -g -fPIC -DDEBUG=1 -DLINUX=1 -DGCC=1"
+AC_SUBST(CFLAGS)
+
+
+AC_CONFIG_FILES([
+        Makefile
+])
+
+AC_OUTPUT
