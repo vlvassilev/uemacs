@@ -20,6 +20,7 @@
 #include "estruct.h"
 #include "edef.h"
 #include "efunc.h"
+#include "utf8.h"
 
 #define	BLOCK_SIZE 16 /* Line block chunk size. */
 
@@ -161,7 +162,7 @@ int linstr(char *instr)
  * well, and FALSE on errors.
  */
 
-int linsert(int n, int c)
+static int linsert_byte(int n, int c)
 {
 	char *cp1;
 	char *cp2;
@@ -239,6 +240,24 @@ int linsert(int n, int c)
 	return TRUE;
 }
 
+int linsert(int n, int c)
+{
+	char utf8[6];
+	int bytes = unicode_to_utf8(c, utf8), i;
+
+	if (bytes == 1)
+		return linsert_byte(n, (unsigned char) utf8[0]);
+	for (i = 0; i < n; i++) {
+		int j;
+		for (j = 0; j < bytes; j++) {
+			unsigned char c = utf8[j];
+			if (!linsert_byte(1, c))
+				return FALSE;
+		}
+	}
+	return TRUE;
+}
+
 /*
  * Overwrite a character into the current line at the current position
  *
@@ -249,7 +268,7 @@ int lowrite(int c)
 	if (curwp->w_doto < curwp->w_dotp->l_used &&
 	    (lgetc(curwp->w_dotp, curwp->w_doto) != '\t' ||
 	     ((curwp->w_doto) & tabmask) == tabmask))
-		ldelete(1L, FALSE);
+		ldelchar(1, FALSE);
 	return linsert(1, c);
 }
 
@@ -334,6 +353,30 @@ int lnewline(void)
 				wp->w_marko -= doto;
 		}
 		wp = wp->w_wndp;
+	}
+	return TRUE;
+}
+
+int lgetchar(unicode_t *c)
+{
+	int len = llength(curwp->w_dotp);
+	char *buf = curwp->w_dotp->l_text;
+	return utf8_to_unicode(buf, curwp->w_doto, len, c);
+}
+
+/*
+ * ldelete() really fundamentally works on bytes, not characters.
+ * It is used for things like "scan 5 words forwards, and remove
+ * the bytes we scanned".
+ *
+ * If you want to delete characters, use ldelchar().
+ */
+int ldelchar(long n, int kflag)
+{
+	while (n-- > 0) {
+		unicode_t c;
+		if (!ldelete(lgetchar(&c), kflag))
+			return FALSE;
 	}
 	return TRUE;
 }
@@ -636,7 +679,7 @@ int yank(int f, int n)
 					if (lnewline() == FALSE)
 						return FALSE;
 				} else {
-					if (linsert(1, c) == FALSE)
+					if (linsert_byte(1, c) == FALSE)
 						return FALSE;
 				}
 			}

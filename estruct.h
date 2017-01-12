@@ -237,10 +237,10 @@
 #define	NCOLORS	8		/* number of supported colors   */
 #define	KBLOCK	250		/* sizeof kill buffer chunks    */
 
-#define CONTROL 0x0100		/* Control flag, or'ed in       */
-#define META    0x0200		/* Meta flag, or'ed in          */
-#define CTLX    0x0400		/* ^X flag, or'ed in            */
-#define	SPEC	0x0800		/* special key (function keys)  */
+#define CONTROL 0x10000000	/* Control flag, or'ed in       */
+#define META    0x20000000	/* Meta flag, or'ed in          */
+#define CTLX    0x40000000	/* ^X flag, or'ed in            */
+#define	SPEC	0x80000000	/* special key (function keys)  */
 
 #ifdef	FALSE
 #undef	FALSE
@@ -412,11 +412,11 @@ struct window {
 	struct buffer *w_bufp;	/* Buffer displayed in window   */
 	struct line *w_linep;	/* Top line in the window       */
 	struct line *w_dotp;	/* Line containing "."          */
-	short w_doto;		/* Byte offset for "."          */
 	struct line *w_markp;	/* Line containing "mark"       */
-	short w_marko;		/* Byte offset for "mark"       */
-	char w_toprow;		/* Origin 0 top row of window   */
-	char w_ntrows;		/* # of rows of text in window  */
+	int w_doto;		/* Byte offset for "."          */
+	int w_marko;		/* Byte offset for "mark"       */
+	int w_toprow;		/* Origin 0 top row of window   */
+	int w_ntrows;		/* # of rows of text in window  */
 	char w_force;		/* If NZ, forcing row.          */
 	char w_flag;		/* Flags.                       */
 #if	COLOR
@@ -452,14 +452,14 @@ struct window {
 struct buffer {
         struct buffer *b_bufp;	/* Link to next struct buffer   */
 	struct line *b_dotp;	/* Link to "." struct line structure   */
-	short b_doto;		/* Offset of "." in above struct line  */
 	struct line *b_markp;	/* The same as the above two,   */
-	short b_marko;		/* but for the "mark"           */
 	struct line *b_linep;	/* Link to the header struct line      */
+	int b_doto;		/* Offset of "." in above struct line  */
+	int b_marko;		/* but for the "mark"           */
+	int b_mode;		/* editor mode of this buffer   */
 	char b_active;		/* window activated flag        */
 	char b_nwnd;		/* Count of windows on buffer   */
 	char b_flag;		/* Flags                        */
-	int b_mode;		/* editor mode of this buffer   */
 	char b_fname[NFILEN];	/* File name                    */
 	char b_bname[NBUFN];	/* Buffer name                  */
 #if	CRYPT
@@ -483,7 +483,6 @@ struct buffer {
 #define MDMAGIC	0x0040		/* regular expresions in search */
 #define	MDCRYPT	0x0080		/* encrytion mode active        */
 #define	MDASAVE	0x0100		/* auto-save mode               */
-#define MDUTF8  0x0200		/* UTF-8 input/output mode      */
 
 /*
  * The starting position of a region, and the size of the region in
@@ -491,7 +490,7 @@ struct buffer {
  */
 struct region {
 	struct line *r_linep;	/* Origin struct line address.         */
-	short r_offset;		/* Origin struct line offset.          */
+	int r_offset;		/* Origin struct line offset.          */
 	long r_size;		/* Length in characters.        */
 };
 
@@ -557,7 +556,7 @@ struct terminal {
 
 /* Structure for the table of initial key bindings. */
 struct key_tab {
-	short k_code;		 /* Key code */
+	int k_code;		 /* Key code */
 	int (*k_fp)(int, int);	 /* Routine to handle it */
 };
 

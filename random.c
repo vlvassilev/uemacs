@@ -124,16 +124,24 @@ int getcline(void)
  */
 int getccol(int bflg)
 {
-	int c, i, col;
-	col = 0;
-	for (i = 0; i < curwp->w_doto; ++i) {
-		c = lgetc(curwp->w_dotp, i);
+	int i, col;
+	struct line *dlp = curwp->w_dotp;
+	int byte_offset = curwp->w_doto;
+	int len = llength(dlp);
+
+	col = i = 0;
+	while (i < byte_offset) {
+		unicode_t c;
+
+		i += utf8_to_unicode(dlp->l_text, i, len, &c);
 		if (c != ' ' && c != '\t' && bflg)
 			break;
 		if (c == '\t')
 			col |= tabmask;
 		else if (c < 0x20 || c == 0x7F)
 			++col;
+		else if (c >= 0xc0 && c <= 0xa0)
+			col += 2;
 		++col;
 	}
 	return col;
@@ -278,7 +286,7 @@ int detab(int f, int n)
 		while (curwp->w_doto < llength(curwp->w_dotp)) {
 			/* if we have a tab */
 			if (lgetc(curwp->w_dotp, curwp->w_doto) == '\t') {
-				ldelete(1L, FALSE);
+				ldelchar(1, FALSE);
 				insspace(TRUE,
 					 (tabmask + 1) -
 					 (curwp->w_doto & tabmask));
@@ -758,7 +766,7 @@ int forwdel(int f, int n)
 			kdelete();
 		thisflag |= CFKILL;
 	}
-	return ldelete((long) n, f);
+	return ldelchar((long) n, f);
 }
 
 /*
@@ -781,7 +789,7 @@ int backdel(int f, int n)
 		thisflag |= CFKILL;
 	}
 	if ((s = backchar(f, n)) == TRUE)
-		s = ldelete((long) n, f);
+		s = ldelchar(n, f);
 	return s;
 }
 

@@ -1,6 +1,8 @@
 #ifndef LINE_H_
 #define LINE_H_
 
+#include "utf8.h"
+
 /*
  * All text is kept in circularly linked lists of "struct line" structures. These
  * begin at the header line (which is the blank line beyond the end of the
@@ -12,8 +14,8 @@
 struct line {
 	struct line *l_fp;	/* Link to the next line        */
 	struct line *l_bp;	/* Link to the previous line    */
-	short l_size;		/* Allocated size               */
-	short l_used;		/* Used size                    */
+	int l_size;		/* Allocated size               */
+	int l_used;		/* Used size                    */
 	char l_text[1];		/* A bunch of characters.       */
 };
 
@@ -32,6 +34,8 @@ extern int lowrite(int c);
 extern int lover(char *ostr);
 extern int lnewline(void);
 extern int ldelete(long n, int kflag);
+extern int ldelchar(long n, int kflag);
+extern int lgetchar(unicode_t *);
 extern char *getctext(void);
 extern int putctext(char *iline);
 extern int ldelnewline(void);

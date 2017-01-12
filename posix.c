@@ -22,27 +22,14 @@
 #include "estruct.h"
 #include "edef.h"
 #include "efunc.h"
+#include "utf8.h"
 
 /* Since Mac OS X's termios.h doesn't have the following 2 macros, define them.
  */
-#if defined(SYSV) && defined(_DARWIN_C_SOURCE)
+#if defined(SYSV) && (defined(_DARWIN_C_SOURCE) || defined(_FREEBSD_C_SOURCE))
 #define OLCUC 0000002
 #define XCASE 0000004
 #endif
-
-/*
- * NOTE NOTE NOTE!
- *
- * Uemacs is currently very much byte-oriented, and not at all UTF8-aware
- * interally. However, this allows it to understand a _terminal_ that is
- * in utf-8 mode, and will turn input into the 8-bit subset, and will turn
- * things back into UTF8 on output.
- *
- * Do _not_ confuse this with the notion of actually being able to edit
- * UTF-8 file _contents_. That's a totally different thing.
- */
-#define utf8_mode() \
-	(curwp && curwp->w_bufp && (curwp->w_bufp->b_mode & MDUTF8))
 
 static int kbdflgs;			/* saved keyboard fd flags      */
 static int kbdpoll;			/* in O_NDELAY mode             */
@@ -120,24 +107,12 @@ void ttclose(void)
  */
 int ttputc(int c)
 {
-	/*
-	 * We always represent things in 1 byte, but if we output
-	 * in UTF-8, we may need to expand that into 2 bytes..
-	 *
-	 * Some day we might even be able to handle UTF-8 _content_.
-	 *
-	 * That day is not today.
-	 */
-	if (utf8_mode()) {
-		c &= 0xff;
-		if (c >= 0x80) {
-			unsigned char first = (c >> 6) | 0xc0;
-			fputc(first, stdout);
-			c = (c & 0x3f) | 0x80;
-		}
-	}
-	fputc(c, stdout);
-	return TRUE;
+	char utf8[6];
+	int bytes;
+
+	bytes = unicode_to_utf8(c, utf8);
+	fwrite(utf8, 1, bytes, stdout);
+	return 0;
 }
 
 /*
@@ -175,10 +150,10 @@ void ttflush(void)
  */
 int ttgetc(void)
 {
-	static unsigned char buffer[32];
+	static char buffer[32];
 	static int pending;
-	unsigned char c, second;
-	int count;
+	unicode_t c;
+	int count, bytes = 1, expected;
 
 	count = pending;
 	if (!count) {
@@ -188,12 +163,29 @@ int ttgetc(void)
 		pending = count;
 	}
 
-	c = buffer[0];
+	c = (unsigned char) buffer[0];
 	if (c >= 32 && c < 128)
 		goto done;
 
+	/*
+	 * Lazy. We don't bother calculating the exact
+	 * expected length. We want at least two characters
+	 * for the special character case (ESC+[) and for
+	 * the normal short UTF8 sequence that starts with
+	 * the 110xxxxx pattern.
+	 *
+	 * But if we have any of the other patterns, just
+	 * try to get more characters. At worst, that will
+	 * just result in a barely perceptible 0.1 second
+	 * delay for some *very* unusual utf8 character
+	 * input.
+	 */
+	expected = 2;
+	if ((c & 0xe0) == 0xe0)
+		expected = 6;
+
 	/* Special character - try to fill buffer */
-	if (count == 1) {
+	if (count < expected) {
 		int n;
 		ntermios.c_cc[VMIN] = 0;
 		ntermios.c_cc[VTIME] = 1;		/* A .1 second lag */
@@ -206,59 +198,24 @@ int ttgetc(void)
 		ntermios.c_cc[VTIME] = 0;
 		tcsetattr(0, TCSANOW, &ntermios);
 
-		if (n <= 0)
+		if (n > 0)
+			pending += n;
+	}
+	if (pending > 1) {
+		unsigned char second = buffer[1];
+
+		/* Turn ESC+'[' into CSI */
+		if (c == 27 && second == '[') {
+			bytes = 2;
+			c = 128+27;
 			goto done;
-		pending += n;
+		}
 	}
-	second = buffer[1];
-
-	/* Turn ESC+'[' into CSI */
-	if (c == 27 && second == '[') {
-		pending -= 2;
-		memmove(buffer, buffer+2, pending);
-		return 128+27;
-	}
-
-	if (!utf8_mode())
-		goto done;
-
-	/* Normal 7-bit? */
-	if (!(c & 0x80))
-		goto done;
-
-	/*
-	 * Unexpected UTF-8 continuation character? Maybe
-	 * we're in non-UTF mode, or maybe it's a control
-	 * character.. Regardless, just pass it on.
-	 */
-	if (!(c & 0x40))
-		goto done;
-
-	/*
-	 * Multi-byte sequences.. Right now we only
-	 * want to get characters that can be represented
-	 * in a single byte, so we're not interested in
-	 * anything else..
-	 */
-	if (c & 0x3c)
-		goto done;
-
-	if ((second & 0xc0) != 0x80)
-		goto done;
-
-	/*
-	 * Ok, it's a two-byte UTF-8 character that can be represented
-	 * as a single-byte Latin1 character!
-	 */
-	c = (c << 6) | (second & 0x3f);
-	pending -= 2;
-	memmove(buffer, buffer+2, pending);
-
-	return c;
+	bytes = utf8_to_unicode(buffer, 0, pending, &c);
 
 done:
-	pending--;
-	memmove(buffer, buffer+1, pending);
+	pending -= bytes;
+	memmove(buffer, buffer+bytes, pending);
 	return c;
 }
 

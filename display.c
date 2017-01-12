@@ -19,6 +19,7 @@
 #include "line.h"
 #include "version.h"
 #include "wrapper.h"
+#include "utf8.h"
 
 struct video {
 	int v_flag;		/* Flags */
@@ -28,7 +29,7 @@ struct video {
 	int v_rfcolor;		/* requested forground color */
 	int v_rbcolor;		/* requested background color */
 #endif
-	char v_text[1];		/* Screen data. */
+	unicode_t v_text[1];	/* Screen data. */
 };
 
 #define VFCHG   0x0001		/* Changed flag                 */
@@ -58,7 +59,7 @@ static void updall(struct window *wp);
 static int scrolls(int inserts);
 static void scrscroll(int from, int to, int count);
 static int texttest(int vrow, int prow);
-static int endofline(char *s, int n);
+static int endofline(unicode_t *s, int n);
 static void updext(void);
 static int updateline(int row, struct video *vp1, struct video *vp2);
 static void modeline(struct window *wp);
@@ -92,7 +93,7 @@ void vtinit(void)
 	pscreen = xmalloc(term.t_mrow * sizeof(struct video *));
 #endif
 	for (i = 0; i < term.t_mrow; ++i) {
-		vp = xmalloc(sizeof(struct video) + term.t_mcol);
+		vp = xmalloc(sizeof(struct video) + term.t_mcol*4);
 		vp->v_flag = 0;
 #if	COLOR
 		vp->v_rfcolor = 7;
@@ -100,7 +101,7 @@ void vtinit(void)
 #endif
 		vscreen[i] = vp;
 #if	MEMMAP == 0 || SCROLLCODE
-		vp = xmalloc(sizeof(struct video) + term.t_mcol);
+		vp = xmalloc(sizeof(struct video) + term.t_mcol*4);
 		vp->v_flag = 0;
 		pscreen[i] = vp;
 #endif
@@ -163,9 +164,16 @@ void vtmove(int row, int col)
  * This routine only puts printing characters into the virtual
  * terminal buffers. Only column overflow is checked.
  */
-static void vtputc(unsigned char c)
+static void vtputc(int c)
 {
 	struct video *vp;	/* ptr to line being updated */
+
+	/* In case somebody passes us a signed char.. */
+	if (c < 0) {
+		c += 256;
+		if (c < 0)
+			return;
+	}
 
 	vp = vscreen[vtrow];
 
@@ -214,7 +222,7 @@ static void vtputc(unsigned char c)
 static void vteeol(void)
 {
 /*  struct video *vp;	*/
-	char *vcp = vscreen[vtrow]->v_text;
+	unicode_t *vcp = vscreen[vtrow]->v_text;
 
 /*  vp = vscreen[vtrow];	*/
 	while (vtcol < term.t_ncol)
@@ -432,6 +440,17 @@ static int reframe(struct window *wp)
 	return TRUE;
 }
 
+static void show_line(struct line *lp)
+{
+	int i = 0, len = llength(lp);
+
+	while (i < len) {
+		unicode_t c;
+		i += utf8_to_unicode(lp->l_text, i, len, &c);
+		vtputc(c);
+	}
+}
+
 /*
  * updone:
  *	update the current line	to the virtual screen
@@ -442,7 +461,6 @@ static void updone(struct window *wp)
 {
 	struct line *lp;	/* line to update */
 	int sline;	/* physical screen line to update */
-	int i;
 
 	/* search down the line we want */
 	lp = wp->w_linep;
@@ -456,8 +474,7 @@ static void updone(struct window *wp)
 	vscreen[sline]->v_flag |= VFCHG;
 	vscreen[sline]->v_flag &= ~VFREQ;
 	vtmove(sline, 0);
-	for (i = 0; i < llength(lp); ++i)
-		vtputc(lgetc(lp, i));
+	show_line(lp);
 #if	COLOR
 	vscreen[sline]->v_rfcolor = wp->w_fcolor;
 	vscreen[sline]->v_rbcolor = wp->w_bcolor;
@@ -475,7 +492,6 @@ static void updall(struct window *wp)
 {
 	struct line *lp;	/* line to update */
 	int sline;	/* physical screen line to update */
-	int i;
 
 	/* search down the lines, updating them */
 	lp = wp->w_linep;
@@ -488,8 +504,7 @@ static void updall(struct window *wp)
 		vtmove(sline, 0);
 		if (lp != wp->w_bufp->b_linep) {
 			/* if we are not at the end */
-			for (i = 0; i < llength(lp); ++i)
-				vtputc(lgetc(lp, i));
+			show_line(lp);
 			lp = lforw(lp);
 		}
 
@@ -512,7 +527,6 @@ static void updall(struct window *wp)
 void updpos(void)
 {
 	struct line *lp;
-	int c;
 	int i;
 
 	/* find the current row */
@@ -527,13 +541,13 @@ void updpos(void)
 	curcol = 0;
 	i = 0;
 	while (i < curwp->w_doto) {
-		c = lgetc(lp, i++);
+		unicode_t c;
+		int bytes;
+
+		bytes = utf8_to_unicode(lp->l_text, i, curwp->w_doto, &c);
+		i += bytes;
 		if (c == '\t')
 			curcol |= tabmask;
-		else if (c < 0x20 || c == 0x7f)
-			++curcol;
-		else if (c >= 0x80 && c <= 0xa0)
-			curcol+=2;
 
 		++curcol;
 	}
@@ -554,7 +568,7 @@ void upddex(void)
 {
 	struct window *wp;
 	struct line *lp;
-	int i, j;
+	int i;
 
 	wp = wheadp;
 
@@ -567,8 +581,7 @@ void upddex(void)
 				if ((wp != curwp) || (lp != wp->w_dotp) ||
 				    (curcol < term.t_ncol - 1)) {
 					vtmove(i, 0);
-					for (j = 0; j < llength(lp); ++j)
-						vtputc(lgetc(lp, j));
+					show_line(lp);
 					vteeol();
 
 					/* this line no longer is extended */
@@ -591,7 +604,7 @@ void upddex(void)
  */
 void updgar(void)
 {
-	char *txt;
+	unicode_t *txt;
 	int i, j;
 
 	for (i = 0; i < term.t_nrow; ++i) {
@@ -698,7 +711,7 @@ static int scrolls(int inserts)
 		end = endofline(vpv->v_text, cols);
 		if (end == 0)
 			target = first;	/* newlines */
-		else if (strncmp(vpp->v_text, vpv->v_text, end) == 0)
+		else if (memcmp(vpp->v_text, vpv->v_text, 4*end) == 0)
 			target = first + 1;	/* broken line newlines */
 		else
 			target = first;
@@ -757,7 +770,7 @@ static int scrolls(int inserts)
 		for (i = 0; i < count; i++) {
 			vpp = pscreen[to + i];
 			vpv = vscreen[to + i];
-			strncpy(vpp->v_text, vpv->v_text, cols);
+			memcpy(vpp->v_text, vpv->v_text, 4*cols);
 			vpp->v_flag = vpv->v_flag;	/* XXX */
 			if (vpp->v_flag & VFREV) {
 				vpp->v_flag &= ~VFREV;
@@ -776,7 +789,7 @@ static int scrolls(int inserts)
 		}
 #if	MEMMAP == 0
 		for (i = from; i < to; i++) {
-			char *txt;
+			unicode_t *txt;
 			txt = pscreen[i]->v_text;
 			for (j = 0; j < term.t_ncol; ++j)
 				txt[j] = ' ';
@@ -805,13 +818,13 @@ static int texttest(int vrow, int prow)
 	struct video *vpv = vscreen[vrow];	/* virtual screen image */
 	struct video *vpp = pscreen[prow];	/* physical screen image */
 
-	return !memcmp(vpv->v_text, vpp->v_text, term.t_ncol);
+	return !memcmp(vpv->v_text, vpp->v_text, 4*term.t_ncol);
 }
 
 /*
  * return the index of the first blank of trailing whitespace
  */
-static int endofline(char *s, int n)
+static int endofline(unicode_t *s, int n)
 {
 	int i;
 	for (i = n - 1; i >= 0; i--)
@@ -833,7 +846,6 @@ static void updext(void)
 {
 	int rcursor;	/* real cursor location */
 	struct line *lp;	/* pointer to current line */
-	int j;		/* index into line */
 
 	/* calculate what column the real cursor will end up in */
 	rcursor = ((curcol - term.t_ncol) % term.t_scrsiz) + term.t_margin;
@@ -843,8 +855,7 @@ static void updext(void)
 	/* once we reach the left edge                                  */
 	vtmove(currow, -lbound);	/* start scanning offscreen */
 	lp = curwp->w_dotp;	/* line to output */
-	for (j = 0; j < llength(lp); ++j)	/* until the end-of-line */
-		vtputc(lgetc(lp, j));
+	show_line(lp);
 
 	/* truncate the virtual line, restore tab offset */
 	vteeol();
@@ -866,8 +877,8 @@ static void updext(void)
 static int updateline(int row, struct video *vp1, struct video *vp2)
 {
 #if	SCROLLCODE
-	char *cp1;
-	char *cp2;
+	unicode_t *cp1;
+	unicode_t *cp2;
 	int nch;
 
 	cp1 = &vp1->v_text[0];
@@ -908,8 +919,8 @@ static int updateline(int row, struct video *vp1, struct video *vp2)
 #if RAINBOW
 /*	UPDATELINE specific code for the DEC rainbow 100 micro	*/
 
-	char *cp1;
-	char *cp2;
+	unicode_t *cp1;
+	unicode_t *cp2;
 	int nch;
 
 	/* since we don't know how to make the rainbow do this, turn it off */
@@ -930,11 +941,11 @@ static int updateline(int row, struct video *vp1, struct video *vp2)
 #else
 /*	UPDATELINE code for all other versions		*/
 
-	char *cp1;
-	char *cp2;
-	char *cp3;
-	char *cp4;
-	char *cp5;
+	unicode_t *cp1;
+	unicode_t *cp2;
+	unicode_t *cp3;
+	unicode_t *cp4;
+	unicode_t *cp5;
 	int nbflag;	/* non-blanks to the right flag? */
 	int rev;		/* reverse video flag */
 	int req;		/* reverse video request flag */
