@@ -2,7 +2,7 @@ AC_INIT([uemacs], [2012.02.07], [vladimir@ellipticlabs.com])
 
 AC_CANONICAL_SYSTEM
 
-AM_INIT_AUTOMAKE([-Wall -Werror foreign])
+AM_INIT_AUTOMAKE([foreign])
 
 AC_PROG_CC
 AC_PROG_CXX
