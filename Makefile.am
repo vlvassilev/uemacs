@@ -34,7 +34,8 @@ $(top_srcdir)/globals.c \
 $(top_srcdir)/version.c \
 $(top_srcdir)/usage.c \
 $(top_srcdir)/wrapper.c \
-$(top_srcdir)/utf8.c
+$(top_srcdir)/utf8.c \
+$(top_srcdir)/util.c
 
 
 em_CPPFLAGS =-I$(top_srcdir)/ -DAUTOCONF -DPOSIX -DUSG -D_BSD_SOURCE -D_SVID_SOURCE -D_XOPEN_SOURCE=600
