@@ -1,0 +1,14 @@
+Source: uemacs
+Section: editors
+Priority: optional
+Maintainer: Vladimir Vassilev <vladimir@transpacket.com>
+Build-Depends: debhelper (>= 10), autoconf, libncurses5-dev
+Standards-Version: 4.1.4
+Homepage: https://yuma123.org
+
+Package: uemacs
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: Very portable full screen editor based on MicroEMACS 3.9e.
+ .
+ The editor used by me and others.
